@@ -1,10 +1,12 @@
 mod common;
+mod music_segment;
 mod music_track;
 
 use std::io;
 
 use binrw::{BinRead, BinWrite, binrw};
 use byteorder::{LE, ReadBytesExt, WriteBytesExt};
+use music_segment::HircMusicSegment;
 use music_track::HircMusicTrack;
 
 use super::{BnkError, Result};
@@ -130,9 +132,9 @@ impl HircEntry {
             HircEntryType::BlendContainer => {
                 HircEntryPayload::BlendContainer(HircUnmanagedEntry::from_reader(reader, length)?)
             }
-            HircEntryType::MusicSegment => {
-                HircEntryPayload::MusicSegment(HircUnmanagedEntry::from_reader(reader, length)?)
-            }
+            HircEntryType::MusicSegment => HircEntryPayload::MusicSegment(Box::new(
+                HircMusicSegment::from_reader(reader, length)?,
+            )),
             HircEntryType::MusicTrack => {
                 HircEntryPayload::MusicTrack(Box::new(HircMusicTrack::from_reader(reader, length)?))
             }
@@ -292,7 +294,7 @@ pub enum HircEntryPayload {
     ActorMixer(HircUnmanagedEntry),
     AudioBus(HircUnmanagedEntry),
     BlendContainer(HircUnmanagedEntry),
-    MusicSegment(HircUnmanagedEntry),
+    MusicSegment(Box<HircMusicSegment>),
     MusicTrack(Box<HircMusicTrack>),
     MusicSwitchContainer(HircUnmanagedEntry),
     MusicPlaylistContainer(HircUnmanagedEntry),

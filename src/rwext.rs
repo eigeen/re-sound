@@ -107,3 +107,59 @@ pub trait WriteVecExt: Write {
 }
 
 impl<T> WriteVecExt for T where T: Write {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinrwNullString(pub binrw::NullString);
+
+impl serde::Serialize for BinrwNullString {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.0.to_string())
+    }
+}
+
+impl<'de> serde::de::Deserialize<'de> for BinrwNullString {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(BinrwNullString(binrw::NullString::from(s)))
+    }
+}
+
+impl AsRef<binrw::NullString> for BinrwNullString {
+    fn as_ref(&self) -> &binrw::NullString {
+        &self.0
+    }
+}
+
+impl binrw::BinRead for BinrwNullString {
+    type Args<'a> = ();
+
+    fn read_options<R: Read + io::Seek>(
+        reader: &mut R,
+        endian: binrw::Endian,
+        args: Self::Args<'_>,
+    ) -> binrw::BinResult<Self> {
+        Ok(BinrwNullString(binrw::NullString::read_options(
+            reader, endian, args,
+        )?))
+    }
+}
+
+impl binrw::BinWrite for BinrwNullString {
+    type Args<'a> = ();
+
+    fn write_options<W: Write + io::Seek>(
+        &self,
+        writer: &mut W,
+        endian: binrw::Endian,
+        args: Self::Args<'_>,
+    ) -> binrw::BinResult<()> {
+        self.0.write_options(writer, endian, args)?;
+        Ok(())
+    }
+}
