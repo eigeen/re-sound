@@ -91,17 +91,19 @@ impl Bnk {
         Ok(Bnk { sections })
     }
 
-    pub fn write_to<W>(&self, writer: &mut W) -> Result<()>
+    pub fn write_to<W>(&mut self, writer: &mut W) -> Result<()>
     where
         W: io::Write + io::Seek,
     {
         let mut didx_entries: Option<&[DidxEntry]> = None;
 
-        for section in &self.sections {
+        for section in &mut self.sections {
             writer.write_all(&section.magic)?;
-            writer.write_u32::<LE>(section.section_length)?;
+            // fix section length
+            writer.write_u32::<LE>(0)?;
+            let start_pos = writer.stream_position()?;
 
-            match &section.payload {
+            match &mut section.payload {
                 SectionPayload::Bkhd {
                     version,
                     id,
@@ -113,14 +115,14 @@ impl Bnk {
                 }
                 SectionPayload::Didx { entries } => {
                     didx_entries.replace(entries);
-                    for entry in entries {
+                    for entry in entries.iter() {
                         let entry_bytes: [u8; 12] = unsafe { std::mem::transmute(entry.clone()) };
                         writer.write_all(&entry_bytes)?;
                     }
                 }
                 SectionPayload::Hirc { entries } => {
                     writer.write_u32::<LE>(entries.len() as u32)?;
-                    for entry in entries {
+                    for entry in entries.iter_mut() {
                         entry.write_to(writer)?;
                     }
                 }
@@ -144,6 +146,13 @@ impl Bnk {
                     writer.write_all(data)?;
                 }
             }
+
+            let end_pos = writer.stream_position()?;
+            // write section length
+            let length = (end_pos - start_pos) as u32;
+            writer.seek(io::SeekFrom::Start(start_pos - 4))?;
+            writer.write_u32::<LE>(length)?;
+            writer.seek(io::SeekFrom::Start(end_pos))?;
         }
         Ok(())
     }
@@ -265,7 +274,7 @@ mod tests {
     fn test_hirc() {
         let input = fs::read(INPUT_HIRC).unwrap();
         let mut reader = io::Cursor::new(&input);
-        let bnk = Bnk::from_reader(&mut reader).unwrap();
+        let mut bnk = Bnk::from_reader(&mut reader).unwrap();
         assert_eq!(&bnk.sections[0].magic, b"BKHD");
 
         let mut output = Vec::new();
@@ -278,7 +287,7 @@ mod tests {
     fn test_hirc_2() {
         let input = fs::read(INPUT_HIRC_2).unwrap();
         let mut reader = io::Cursor::new(&input);
-        let bnk = Bnk::from_reader(&mut reader).unwrap();
+        let mut bnk = Bnk::from_reader(&mut reader).unwrap();
 
         let mut output = Vec::new();
         let mut writer = io::Cursor::new(&mut output);
@@ -290,7 +299,7 @@ mod tests {
     fn test_didx_data() {
         let input = fs::read(INPUT_DIDX_DATA).unwrap();
         let mut reader = io::Cursor::new(&input);
-        let bnk = Bnk::from_reader(&mut reader).unwrap();
+        let mut bnk = Bnk::from_reader(&mut reader).unwrap();
 
         let mut output = Vec::new();
         let mut writer = io::Cursor::new(&mut output);

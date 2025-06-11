@@ -1,13 +1,16 @@
 mod common;
+mod music_ran_sec_cntr;
 mod music_segment;
 mod music_track;
+
+pub use music_ran_sec_cntr::*;
+pub use music_segment::*;
+pub use music_track::*;
 
 use std::io;
 
 use binrw::{BinRead, BinWrite, binrw};
 use byteorder::{LE, ReadBytesExt, WriteBytesExt};
-use music_segment::HircMusicSegment;
-use music_track::HircMusicTrack;
 
 use super::{BnkError, Result};
 use crate::rwext::ReadVecExt;
@@ -23,6 +26,10 @@ trait EntryPayloadExt: Sized {
     fn write_to<W>(&self, writer: &mut W) -> Result<()>
     where
         W: io::Write + io::Seek;
+
+    fn fix_values(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -76,25 +83,9 @@ impl HircEntry {
                 let parameters = reader.read_vec_u8(parameter_count as usize)?;
                 let _unk2 = reader.read_u8()?;
 
-                let payload = match action_type {
-                    HircEventActionType::SetBusVolume => HircEventActionPayload::SetState {
-                        state_group_id: reader.read_u32::<LE>()?,
-                        state_id: reader.read_u32::<LE>()?,
-                    },
-                    HircEventActionType::SetGameParameter => HircEventActionPayload::SetSwitch {
-                        switch_group_id: reader.read_u32::<LE>()?,
-                        switch_id: reader.read_u32::<LE>()?,
-                        data: reader.read_vec_u8(length as usize - 21)?,
-                    },
-                    _ => {
-                        let buf = reader.read_vec_u8(
-                            (length as usize)
-                                - 13
-                                - (size_of::<u8>() * (parameter_count as usize) * 2),
-                        )?;
-                        HircEventActionPayload::Unknown(buf)
-                    }
-                };
+                let data = reader.read_vec_u8(
+                    (length as usize) - 13 - (size_of::<u8>() * (parameter_count as usize) * 2),
+                )?;
 
                 HircEntryPayload::EventAction(HircEventAction {
                     scope,
@@ -105,7 +96,7 @@ impl HircEntry {
                     parameter_types,
                     parameters,
                     _unk2,
-                    payload,
+                    data,
                 })
             }
             HircEntryType::Event => {
@@ -141,9 +132,9 @@ impl HircEntry {
             HircEntryType::MusicSwitchContainer => HircEntryPayload::MusicSwitchContainer(
                 HircUnmanagedEntry::from_reader(reader, length)?,
             ),
-            HircEntryType::MusicPlaylistContainer => HircEntryPayload::MusicPlaylistContainer(
-                HircUnmanagedEntry::from_reader(reader, length)?,
-            ),
+            HircEntryType::MusicRanSeqCntr => HircEntryPayload::MusicRanSeqCntr(Box::new(
+                HircMusicRanSecCntr::from_reader(reader, length)?,
+            )),
             HircEntryType::Attenuation => {
                 HircEntryPayload::Attenuation(HircUnmanagedEntry::from_reader(reader, length)?)
             }
@@ -175,13 +166,18 @@ impl HircEntry {
         })
     }
 
-    pub(super) fn write_to<W>(&self, writer: &mut W) -> Result<()>
+    pub(super) fn write_to<W>(&mut self, writer: &mut W) -> Result<()>
     where
         W: io::Write + io::Seek,
     {
         writer.write_u8(self.entry_type.as_u8())?;
-        writer.write_u32::<LE>(self.length)?;
+        // length needs to re-calculate
+        writer.write_u32::<LE>(0)?;
+        let start_pos = writer.stream_position()?;
         writer.write_u32::<LE>(self.id)?;
+
+        self.payload.fix_values()?;
+
         match &self.payload {
             HircEntryPayload::Settings(entry) => {
                 entry.write_to(writer)?;
@@ -200,27 +196,8 @@ impl HircEntry {
                 }
                 writer.write_all(&hirc_event_action.parameters)?;
                 writer.write_u8(hirc_event_action._unk2)?;
-                match &hirc_event_action.payload {
-                    HircEventActionPayload::SetState {
-                        state_group_id,
-                        state_id,
-                    } => {
-                        writer.write_u32::<LE>(*state_group_id)?;
-                        writer.write_u32::<LE>(*state_id)?;
-                    }
-                    HircEventActionPayload::SetSwitch {
-                        switch_group_id,
-                        switch_id,
-                        data,
-                    } => {
-                        writer.write_u32::<LE>(*switch_group_id)?;
-                        writer.write_u32::<LE>(*switch_id)?;
-                        writer.write_all(data)?;
-                    }
-                    HircEventActionPayload::Unknown(buf) => {
-                        writer.write_all(buf)?;
-                    }
-                }
+
+                writer.write_all(&hirc_event_action.data)?;
             }
             HircEntryPayload::Event { action_ids } => {
                 writer.write_u8(action_ids.len() as u8)?;
@@ -252,7 +229,7 @@ impl HircEntry {
             HircEntryPayload::MusicSwitchContainer(entry) => {
                 entry.write_to(writer)?;
             }
-            HircEntryPayload::MusicPlaylistContainer(entry) => {
+            HircEntryPayload::MusicRanSeqCntr(entry) => {
                 entry.write_to(writer)?;
             }
             HircEntryPayload::Attenuation(entry) => {
@@ -277,6 +254,14 @@ impl HircEntry {
                 entry.write_to(writer)?;
             }
         }
+
+        let end_pos = writer.stream_position()?;
+        // write length
+        let length = (end_pos - start_pos) as u32;
+        writer.seek(io::SeekFrom::Start(start_pos - 4))?;
+        writer.write_u32::<LE>(length)?;
+        writer.seek(io::SeekFrom::Start(end_pos))?;
+
         Ok(())
     }
 }
@@ -297,7 +282,7 @@ pub enum HircEntryPayload {
     MusicSegment(Box<HircMusicSegment>),
     MusicTrack(Box<HircMusicTrack>),
     MusicSwitchContainer(HircUnmanagedEntry),
-    MusicPlaylistContainer(HircUnmanagedEntry),
+    MusicRanSeqCntr(Box<HircMusicRanSecCntr>),
     Attenuation(HircUnmanagedEntry),
     DialogueEvent(HircUnmanagedEntry),
     MotionBus(HircUnmanagedEntry),
@@ -305,6 +290,33 @@ pub enum HircEntryPayload {
     Effect(HircUnmanagedEntry),
     AuxiliaryBus(HircUnmanagedEntry),
     Unknown(HircUnmanagedEntry),
+}
+
+impl HircEntryPayload {
+    fn fix_values(&mut self) -> Result<()> {
+        match self {
+            HircEntryPayload::Settings(v) => v.fix_values(),
+            HircEntryPayload::Sound(_) => Ok(()),
+            HircEntryPayload::EventAction(_) => Ok(()),
+            HircEntryPayload::Event { .. } => Ok(()),
+            HircEntryPayload::RandomOrSequenceContainer(v) => v.fix_values(),
+            HircEntryPayload::SwitchContainer(v) => v.fix_values(),
+            HircEntryPayload::ActorMixer(v) => v.fix_values(),
+            HircEntryPayload::AudioBus(v) => v.fix_values(),
+            HircEntryPayload::BlendContainer(v) => v.fix_values(),
+            HircEntryPayload::MusicSegment(v) => v.fix_values(),
+            HircEntryPayload::MusicTrack(v) => v.fix_values(),
+            HircEntryPayload::MusicSwitchContainer(v) => v.fix_values(),
+            HircEntryPayload::MusicRanSeqCntr(v) => v.fix_values(),
+            HircEntryPayload::Attenuation(v) => v.fix_values(),
+            HircEntryPayload::DialogueEvent(v) => v.fix_values(),
+            HircEntryPayload::MotionBus(v) => v.fix_values(),
+            HircEntryPayload::MotionFx(v) => v.fix_values(),
+            HircEntryPayload::Effect(v) => v.fix_values(),
+            HircEntryPayload::AuxiliaryBus(v) => v.fix_values(),
+            HircEntryPayload::Unknown(v) => v.fix_values(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -362,22 +374,7 @@ pub struct HircEventAction {
     pub parameter_types: Vec<HircEventActionParameterType>,
     pub parameters: Vec<u8>,
     _unk2: u8,
-    pub payload: HircEventActionPayload,
-}
-
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum HircEventActionPayload {
-    SetState {
-        state_group_id: u32,
-        state_id: u32,
-    },
-    SetSwitch {
-        switch_group_id: u32,
-        switch_id: u32,
-        data: Vec<u8>,
-    },
-    Unknown(Vec<u8>),
+    pub data: Vec<u8>,
 }
 
 #[binrw]
@@ -504,7 +501,7 @@ pub enum HircEntryType {
     MusicSegment = 10,
     MusicTrack = 11,
     MusicSwitchContainer = 12,
-    MusicPlaylistContainer = 13,
+    MusicRanSeqCntr = 13,
     Attenuation = 14,
     DialogueEvent = 15,
     MotionBus = 16,
@@ -530,7 +527,7 @@ impl HircEntryType {
             HircEntryType::MusicSegment => 10,
             HircEntryType::MusicTrack => 11,
             HircEntryType::MusicSwitchContainer => 12,
-            HircEntryType::MusicPlaylistContainer => 13,
+            HircEntryType::MusicRanSeqCntr => 13,
             HircEntryType::Attenuation => 14,
             HircEntryType::DialogueEvent => 15,
             HircEntryType::MotionBus => 16,
