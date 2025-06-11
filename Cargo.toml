@@ -1,6 +1,6 @@
 [package]
 name = "re-sound"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
@@ -9,7 +9,7 @@ strum = { version = "0.27", features = ["derive"] }
 thiserror = "2.0"
 
 serde = { version = "1", features = ["derive"], optional = true }
-binrw = "0.14.1"
+binrw = "0.15"
 
 [features]
 default = ["serde"]
