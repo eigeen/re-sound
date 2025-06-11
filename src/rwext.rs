@@ -12,6 +12,7 @@ pub trait ReadVecExt: Read {
         Ok(v)
     }
 
+    #[allow(dead_code)]
     fn read_vec(&mut self, vec_size: usize, element_size: usize) -> io::Result<Vec<Vec<u8>>> {
         let mut v = Vec::with_capacity(vec_size);
         for _ in 0..vec_size {
@@ -52,6 +53,7 @@ pub trait ReadVecExt: Read {
     /// # Safety
     ///
     /// Using [std::mem::transmute] to convert types.
+    #[allow(dead_code)]
     unsafe fn read_vec_t<T>(&mut self) -> io::Result<Vec<T>>
     where
         T: Sized,
@@ -74,6 +76,7 @@ pub trait ReadVecExt: Read {
 
 impl<T> ReadVecExt for T where T: Read {}
 
+#[allow(dead_code)]
 pub trait WriteVecExt: Write {
     fn write_vec(&mut self, elements: &[impl AsRef<[u8]>]) -> io::Result<usize> {
         let mut size = 0;
