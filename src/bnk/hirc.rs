@@ -268,7 +268,7 @@ impl HircEntry {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(tag = "type", content = "content"))]
+#[cfg_attr(feature = "serde", serde(tag = "type"))]
 pub enum HircEntryPayload {
     Settings(HircUnmanagedEntry),
     Sound(HircSound),
