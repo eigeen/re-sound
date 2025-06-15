@@ -9,29 +9,29 @@ use super::{EntryPayloadExt, MusicNodeParams, Result};
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct HircMusicRanSecCntr {
-    music_ran_sec_cntr_initial_values: MusicRanSecCntrInitialValues,
+pub struct HircMusicRanSeqCntr {
+    music_ran_seq_cntr_initial_values: MusicRanSeqCntrInitialValues,
 }
 
-impl EntryPayloadExt for HircMusicRanSecCntr {
+impl EntryPayloadExt for HircMusicRanSeqCntr {
     fn from_reader<R>(reader: &mut R, length: u32) -> Result<Self>
     where
         R: Read + Seek,
     {
         let pos_start = reader.stream_position()?;
-        let music_ran_sec_cntr_initial_values = MusicRanSecCntrInitialValues::read_le(reader)?;
+        let music_ran_seq_cntr_initial_values = MusicRanSeqCntrInitialValues::read_le(reader)?;
         let pos_end = reader.stream_position()?;
         let read_size = pos_end - pos_start;
         if read_size != length as u64 - 4 {
             return Err(BnkError::BadDataSize {
-                name: "MusicRanSecCntrInitialValues".to_string(),
+                name: "MusicRanSeqCntrInitialValues".to_string(),
                 expected: length as u64 - 4,
                 got: read_size,
                 start: pos_start,
             });
         }
-        Ok(HircMusicRanSecCntr {
-            music_ran_sec_cntr_initial_values,
+        Ok(HircMusicRanSeqCntr {
+            music_ran_seq_cntr_initial_values,
         })
     }
 
@@ -39,19 +39,19 @@ impl EntryPayloadExt for HircMusicRanSecCntr {
     where
         W: Write + Seek,
     {
-        self.music_ran_sec_cntr_initial_values.write_le(writer)?;
+        self.music_ran_seq_cntr_initial_values.write_le(writer)?;
         Ok(())
     }
 
     fn fix_values(&mut self) -> Result<()> {
         // fix num_play_list_items
         let num_play_list_items = self
-            .music_ran_sec_cntr_initial_values
+            .music_ran_seq_cntr_initial_values
             .play_list_items
             .iter()
             .map(get_num_recursive)
             .sum::<u32>();
-        self.music_ran_sec_cntr_initial_values.num_play_list_items = num_play_list_items;
+        self.music_ran_seq_cntr_initial_values.num_play_list_items = num_play_list_items;
 
         Ok(())
     }
@@ -67,14 +67,14 @@ fn get_num_recursive(play_list_item: &AkMusicRanSeqPlaylistItem) -> u32 {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct MusicRanSecCntrInitialValues {
+pub struct MusicRanSeqCntrInitialValues {
     music_trans_node_params: MusicTransNodeParams,
     /// This is total number of play list items, recursive.
     num_play_list_items: u32,
     play_list_items: Vec<AkMusicRanSeqPlaylistItem>,
 }
 
-impl BinRead for MusicRanSecCntrInitialValues {
+impl BinRead for MusicRanSeqCntrInitialValues {
     type Args<'a> = ();
 
     fn read_options<R: Read + Seek>(
@@ -104,7 +104,7 @@ impl BinRead for MusicRanSecCntrInitialValues {
             }
         }
 
-        Ok(MusicRanSecCntrInitialValues {
+        Ok(MusicRanSeqCntrInitialValues {
             music_trans_node_params,
             num_play_list_items,
             play_list_items,
@@ -112,7 +112,7 @@ impl BinRead for MusicRanSecCntrInitialValues {
     }
 }
 
-impl BinWrite for MusicRanSecCntrInitialValues {
+impl BinWrite for MusicRanSeqCntrInitialValues {
     type Args<'a> = ();
 
     fn write_options<W: Write + Seek>(

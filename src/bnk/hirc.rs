@@ -1,9 +1,9 @@
 mod common;
-mod music_ran_sec_cntr;
+mod music_ran_seq_cntr;
 mod music_segment;
 mod music_track;
 
-pub use music_ran_sec_cntr::*;
+pub use music_ran_seq_cntr::*;
 pub use music_segment::*;
 pub use music_track::*;
 
@@ -133,7 +133,7 @@ impl HircEntry {
                 HircUnmanagedEntry::from_reader(reader, length)?,
             ),
             HircEntryType::MusicRanSeqCntr => HircEntryPayload::MusicRanSeqCntr(Box::new(
-                HircMusicRanSecCntr::from_reader(reader, length)?,
+                HircMusicRanSeqCntr::from_reader(reader, length)?,
             )),
             HircEntryType::Attenuation => {
                 HircEntryPayload::Attenuation(HircUnmanagedEntry::from_reader(reader, length)?)
@@ -282,7 +282,7 @@ pub enum HircEntryPayload {
     MusicSegment(Box<HircMusicSegment>),
     MusicTrack(Box<HircMusicTrack>),
     MusicSwitchContainer(HircUnmanagedEntry),
-    MusicRanSeqCntr(Box<HircMusicRanSecCntr>),
+    MusicRanSeqCntr(Box<HircMusicRanSeqCntr>),
     Attenuation(HircUnmanagedEntry),
     DialogueEvent(HircUnmanagedEntry),
     MotionBus(HircUnmanagedEntry),

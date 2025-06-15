@@ -82,7 +82,7 @@ dependencies = [
 
 [[package]]
 name = "re-sound"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "binrw",
  "byteorder",
