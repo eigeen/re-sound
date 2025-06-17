@@ -1,4 +1,7 @@
-use std::io;
+use std::{
+    fs::File,
+    io::{self, Read},
+};
 
 use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 use serde::{Deserialize, Serialize};
@@ -16,6 +19,62 @@ pub enum PckError {
     InvalidMagic([u8; 4]),
     #[error("Assertion failed: {0}")]
     Assertion(String),
+}
+
+pub struct Pck<R> {
+    reader: R,
+    header: PckHeader,
+}
+
+impl Pck<io::BufReader<File>> {
+    pub fn from_file(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        let file = File::open(path)?;
+        let reader = io::BufReader::new(file);
+        Self::from_reader(reader)
+    }
+}
+
+impl<R> Pck<R>
+where
+    R: io::Read + io::Seek,
+{
+    pub fn from_reader(mut reader: R) -> Result<Self>
+    where
+        R: io::Read + io::Seek,
+    {
+        let header = PckHeader::from_reader(&mut reader)?;
+
+        Ok(Pck { reader, header })
+    }
+
+    pub fn header(&self) -> &PckHeader {
+        &self.header
+    }
+
+    pub fn header_mut(&mut self) -> &mut PckHeader {
+        &mut self.header
+    }
+
+    pub fn has_data(&mut self) -> bool {
+        // try to read the first entry
+        let wem_reader = self.wem_reader(0);
+        let Some(mut wem_reader) = wem_reader else {
+            return false;
+        };
+        let mut nul = vec![];
+        let result = wem_reader.read_to_end(&mut nul);
+
+        result.is_ok()
+    }
+
+    pub fn wem_reader(&mut self, index: usize) -> Option<PckWemReader<'_, R>> {
+        if index >= self.header.wem_entries.len() {
+            return None;
+        }
+        let entry = &self.header.wem_entries[index];
+
+        Some(PckWemReader::new(&mut self.reader, entry))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,17 +162,6 @@ impl PckHeader {
             wem_entries,
             unk_struct_data,
         })
-    }
-
-    pub fn wem_reader<R>(&self, reader: R, index: usize) -> Option<PckWemReader<R>>
-    where
-        R: io::Read + io::Seek,
-    {
-        if index >= self.wem_entries.len() {
-            return None;
-        }
-        let entry = &self.wem_entries[index];
-        Some(PckWemReader::new(reader, entry))
     }
 
     pub fn write_to<W>(&self, writer: &mut W) -> io::Result<()>
@@ -242,7 +290,7 @@ pub struct PckString {
 }
 
 pub struct PckWemReader<'a, R> {
-    reader: R,
+    reader: &'a mut R,
     entry: &'a PckWemEntry,
     read_size: usize,
 }
@@ -251,7 +299,7 @@ impl<'a, R> PckWemReader<'a, R>
 where
     R: io::Read + io::Seek,
 {
-    fn new(reader: R, entry: &'a PckWemEntry) -> Self {
+    fn new(reader: &'a mut R, entry: &'a PckWemEntry) -> Self {
         PckWemReader {
             reader,
             entry,
@@ -280,7 +328,8 @@ where
             buf[..available].copy_from_slice(&read_buf);
             available
         } else {
-            self.reader.read(buf)?
+            self.reader.read_exact(buf)?;
+            buf.len()
         };
         self.read_size += size;
         Ok(size)
@@ -289,33 +338,47 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        fs,
-        io::{Cursor, Read},
-    };
+    use std::{fs, io::Read};
 
     use super::*;
 
-    const INPUT: &str = "test_files/Cat_cmn_m.spck.1.X64";
+    #[test]
+    fn test_pck_from_reader_headeronly() {
+        let mut input = fs::read("test_files/Cat_cmn_m_headeronly.spck.1.X64").unwrap();
+        let mut reader = io::Cursor::new(&mut input);
+        let mut pck = Pck::from_reader(&mut reader).unwrap();
+        let header = pck.header();
+        assert_eq!(header.wem_entries.len(), 333);
+        assert_eq!(header.language_size(), 20);
+        assert_eq!(header.bnk_table_size(), 4);
+        assert_eq!(header.wem_table_size(), 6664);
+        assert_eq!(header.unk_struct_size(), 4);
+        assert_eq!(header.header_size(), 6712);
+        assert_eq!(header.get_wem_offset_start(), 6720);
+
+        // eprintln!("header: {:?}", header);
+        assert!(!pck.has_data());
+        // assert eof
+        assert_eq!(
+            pck.wem_reader(0)
+                .unwrap()
+                .read_to_end(&mut vec![])
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+    }
 
     #[test]
     fn test_pck_from_reader() {
-        let mut input = fs::read(INPUT).unwrap();
-        let mut reader = io::Cursor::new(&mut input);
-        let pck = PckHeader::from_reader(&mut reader).unwrap();
-        assert_eq!(pck.wem_entries.len(), 333);
-        assert_eq!(pck.language_size(), 20);
-        assert_eq!(pck.bnk_table_size(), 4);
-        assert_eq!(pck.wem_table_size(), 6664);
-        assert_eq!(pck.unk_struct_size(), 4);
-        assert_eq!(pck.header_size(), 6712);
-        assert_eq!(pck.get_wem_offset_start(), 6720);
-        // eprintln!("pck: {:?}", pck);
-        for i in 0..pck.wem_entries.len() {
-            let mut wem_reader = pck.wem_reader(Cursor::new(&mut input), i).unwrap();
+        let mut pck = Pck::from_file("test_files/Cat_cmn_m.spck.1.X64").unwrap();
+
+        assert!(pck.has_data());
+        for i in 0..pck.header().wem_entries.len() {
+            let mut wem_reader = pck.wem_reader(i).unwrap();
             let mut buf = vec![];
             wem_reader.read_to_end(&mut buf).unwrap();
-            assert_eq!(buf.len(), pck.wem_entries[i].length as usize);
+            assert_eq!(buf.len(), pck.header().wem_entries[i].length as usize);
             assert_eq!(&buf[0..4], b"RIFF");
         }
     }
