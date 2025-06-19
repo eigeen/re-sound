@@ -95,6 +95,9 @@ impl Bnk {
     where
         W: io::Write + io::Seek,
     {
+        // fix values
+        self.fix_values()?;
+
         let mut didx_entries: Option<&[DidxEntry]> = None;
 
         for section in &mut self.sections {
@@ -135,12 +138,8 @@ impl Bnk {
                         let entry = &didx_entries[i];
                         writer.seek(io::SeekFrom::Start(data_start_pos + entry.offset as u64))?;
                         writer.write_all(data)?;
-                        // 16字节对齐 padding
+                        // Unimplemented feature: 16字节对齐 padding
                     }
-                    // 移动到padding末尾
-                    writer.seek(io::SeekFrom::Start(
-                        data_start_pos + section.section_length as u64,
-                    ))?;
                 }
                 SectionPayload::Unk { data } => {
                     writer.write_all(data)?;
@@ -150,10 +149,61 @@ impl Bnk {
             let end_pos = writer.stream_position()?;
             // write section length
             let length = (end_pos - start_pos) as u32;
+            eprintln!(
+                "section length: {} section: {:?} start_pos: {} end_pos: {}",
+                length, section.magic, start_pos, end_pos
+            );
             writer.seek(io::SeekFrom::Start(start_pos - 4))?;
             writer.write_u32::<LE>(length)?;
             writer.seek(io::SeekFrom::Start(end_pos))?;
         }
+        Ok(())
+    }
+
+    fn fix_values(&mut self) -> Result<()> {
+        // 查找 DIDX 和 DATA 部分
+        let mut didx_section = None;
+        let mut data_section = None;
+
+        for section in &mut self.sections {
+            match &mut section.payload {
+                SectionPayload::Didx { entries } => {
+                    didx_section = Some(entries);
+                }
+                SectionPayload::Data { data_list } => {
+                    data_section = Some(data_list);
+                }
+                _ => {}
+            }
+        }
+
+        // 确保找到了 DIDX 和 DATA 部分
+        let (didx_entries, data_list) = match (didx_section, data_section) {
+            (Some(didx), Some(data)) => (didx, data),
+            _ => return Ok(()), // 如果没有 DIDX 或 DATA 部分，直接返回
+        };
+
+        // 检查 DIDX 条目数量是否与 DATA 列表数量匹配
+        if didx_entries.len() != data_list.len() {
+            return Err(BnkError::BadDataSize {
+                name: "DIDX entries".to_string(),
+                expected: data_list.len() as u64,
+                got: didx_entries.len() as u64,
+                start: 0,
+            });
+        }
+
+        // 修复偏移和长度值
+        let mut current_offset = 0u32;
+        for (didx_entry, data) in didx_entries.iter_mut().zip(data_list.iter()) {
+            // 更新长度
+            didx_entry.length = data.len() as u32;
+            // 更新偏移
+            didx_entry.offset = current_offset;
+            // 计算下一个偏移（当前偏移 + 当前长度）
+            current_offset += didx_entry.length;
+        }
+
         Ok(())
     }
 }
