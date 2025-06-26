@@ -2,7 +2,7 @@ pub mod hirc;
 
 use std::io;
 
-use byteorder::{LE, ReadBytesExt, WriteBytesExt};
+use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 
 use hirc::*;
 
@@ -149,10 +149,6 @@ impl Bnk {
             let end_pos = writer.stream_position()?;
             // write section length
             let length = (end_pos - start_pos) as u32;
-            eprintln!(
-                "section length: {} section: {:?} start_pos: {} end_pos: {}",
-                length, section.magic, start_pos, end_pos
-            );
             writer.seek(io::SeekFrom::Start(start_pos - 4))?;
             writer.write_u32::<LE>(length)?;
             writer.seek(io::SeekFrom::Start(end_pos))?;
